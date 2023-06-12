@@ -199,7 +199,7 @@ int main(int argc, char* argv[])
 			CloseHandle(mapfile_handle);
 	}
 	else {
-		std::cout << "Pass a file as argument" << std::endl;
+		std::cout << "Argc < 1, You need to pass a filepath for analyzing" << std::endl;
 	}
 }
 
