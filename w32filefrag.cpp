@@ -7,6 +7,8 @@
 #include <iostream>
 #include <windows.h>
 #include <map>
+#include <io.h> 
+#define access    _access_s
 
 #define SUPERMAXPATH 4096
 
@@ -59,7 +61,8 @@ bool GetVolInfo(wchar_t* pfname, VINFO* vinfo) {
 }
 
 
-void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo)
+
+void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 {
 	if (NULL == handle)
 	{
@@ -140,25 +143,21 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo)
 		};
 	} while (ERROR_MORE_DATA == error);
 
-	std::wcout << "file: " << pfname << std::endl;
-	std::cout << "total_clusters: " << total << std::endl;
-	std::cout << "cluster_size_b: " << vinfo->ClusterSize << std::endl;
-	std::cout << "total_size_b: " << total*(vinfo->ClusterSize) << std::endl;
-	std::cout << "extent_count: " << frags << std::endl;
+	fprintf(outf,"file: %ws\n", pfname);
+	fprintf(outf,"total_clusters: %lld\n", total);
+	fprintf(outf, "cluster_size_b: %ld\n", vinfo->ClusterSize);
+	fprintf(outf, "total_size_b: %lld\n", total*(vinfo->ClusterSize));
+	fprintf(outf, "extent_count: %lld\n", frags);
 
 	std::map<LONGLONG, PFRAG>::iterator it;
-	std::cout << "extents:"<< std::endl;
+	fprintf(outf, "extents:\n");
 	for (it = fragments.begin(); it != fragments.end(); it++)
 	{
-		std::cout << "  - {lcn: [" << it->first    // string (key)
-			<< ","
-			<< it->second->lcnstop.QuadPart  // string's value 
-			<< "], vcn: ["
-			<< it->second->vcnstart.QuadPart
-			<< ","
-			<< it->second->vcnstop.QuadPart
-			<< "]}"
-			<< std::endl;
+		fprintf(outf, " - {lcn: [%lld,%lld], vcn: [%lld,%lld]}\n",
+			it->first,
+			it->second->lcnstop.QuadPart,
+			it->second->vcnstart.QuadPart,
+			it->second->vcnstop.QuadPart);
 		free(it->second);
 	}
 	//powershell parsing
@@ -171,37 +170,92 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo)
 int main(int argc, char* argv[])
 {
 	if (argc > 1) {
-		HANDLE file_handle = NULL;
-		HANDLE mapfile_handle = NULL;
+		
+		
+		FILE* outf = NULL;
+		bool closeout = false;
+		char* in_file = NULL ;
 
-		file_handle = CreateFileA(argv[1],
-			GENERIC_READ,
-			0,
-			NULL,
-			OPEN_EXISTING,
-			FILE_ATTRIBUTE_NORMAL,
-			NULL);
+		for (int i = 1; i < argc; i++) {
+			if (strcmp(argv[i],"-o") == 0 && (i+1) < argc) {
+				char* outfile = argv[i + 1];
 
-		if (INVALID_HANDLE_VALUE == file_handle)
-		{
-			std::cout << "open file failed ,errror = " << GetLastError() << std::endl;
+				if (access(outfile, 0) != 0) {
+					std::cout << "out_file: " << outfile << std::endl;
+					errno_t tryopen = fopen_s(&outf, outfile, "w+");
+
+					if (tryopen == 0) {
+						closeout = true;
+					}
+					else {
+						std::cout << "fopen_s failed with error :" << tryopen << std::endl;
+						exit(-1);
+					}
+				} else {
+					std::cout << outfile << " exists, refusing to write to it" << std::endl;
+					exit(-1);
+				}
+				i++;
+			} else {
+				in_file = argv[i];
+				std::cout << "parsing_file:" << in_file << std::endl;
+			}
 		}
-		else
-		{
-			VINFO vinfo;
+		if (in_file != NULL) {
+			if (outf == NULL) {
+				outf = stdout;
+				std::cout << "out_file: stdout" << std::endl;
+			}
+
+			
+
+			HANDLE file_handle = NULL;
+			HANDLE mapfile_handle = NULL;
+
 			wchar_t wstr[SUPERMAXPATH];
-			size_t outSize;
-			mbstowcs_s(&outSize,wstr, argv[1], SUPERMAXPATH);
-			GetVolInfo(wstr, &vinfo);			
-			GetFileOffset(wstr,file_handle,&vinfo);
+			size_t outSize = 0;
+			mbstowcs_s(&outSize, wstr, in_file, SUPERMAXPATH);
+
+			
+
+			file_handle = CreateFileA(in_file,
+				GENERIC_READ,
+				0,
+				NULL,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL,
+				NULL);
+
+			if (INVALID_HANDLE_VALUE == file_handle)
+			{
+				std::cout << "open file failed ,error = " << GetLastError() << std::endl;
+				_fcloseall();
+				exit(-3);
+			}
+			else
+			{
+				VINFO vinfo;
+			
+				GetVolInfo(wstr, &vinfo);			
+				GetFileOffset(wstr,file_handle,&vinfo,outf);
+			}
+
+
+			if (mapfile_handle)
+				CloseHandle(mapfile_handle);
+			if (closeout)
+				fclose(outf);
 		}
-
-
-		if (mapfile_handle)
-			CloseHandle(mapfile_handle);
+		else {
+			std::cout << "could not find ref file" << std::endl;
+			_fcloseall();
+			exit(-4);
+		}
 	}
 	else {
 		std::cout << "Argc < 1, You need to pass a filepath for analyzing" << std::endl;
 	}
+
+	
 }
 
