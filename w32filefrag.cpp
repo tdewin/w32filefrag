@@ -176,10 +176,14 @@ int main(int argc, char* argv[])
 		bool closeout = false;
 		char* in_file = NULL ;
 
+		//parsing arguments
+		//-o outfile infile
+		//or 
+		//infile
 		for (int i = 1; i < argc; i++) {
 			if (strcmp(argv[i],"-o") == 0 && (i+1) < argc) {
 				char* outfile = argv[i + 1];
-
+				//check if file exists and if so, refuse to use it
 				if (access(outfile, 0) != 0) {
 					std::cout << "out_file: " << outfile << std::endl;
 					errno_t tryopen = fopen_s(&outf, outfile, "w+");
@@ -201,16 +205,16 @@ int main(int argc, char* argv[])
 				std::cout << "parsing_file:" << in_file << std::endl;
 			}
 		}
+
+		//real work
 		if (in_file != NULL) {
 			if (outf == NULL) {
 				outf = stdout;
 				std::cout << "out_file: stdout" << std::endl;
 			}
 
-			
-
 			HANDLE file_handle = NULL;
-			HANDLE mapfile_handle = NULL;
+			
 
 			wchar_t wstr[SUPERMAXPATH];
 			size_t outSize = 0;
@@ -241,8 +245,8 @@ int main(int argc, char* argv[])
 			}
 
 
-			if (mapfile_handle)
-				CloseHandle(mapfile_handle);
+			if (file_handle)
+				CloseHandle(file_handle);
 			if (closeout)
 				fclose(outf);
 		}
