@@ -78,7 +78,7 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo)
 	LONGLONG				   total =0;
 	LONGLONG				   vcnlength = 0;
 	LONGLONG				   frags = 0;
-
+	LONGLONG				one = 1;
 	std::map<LONGLONG, PFRAG> fragments;
 
 	vcn_buffer.StartingVcn.QuadPart = pre_vcn = 0;
@@ -117,11 +117,13 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo)
 
 			//std::cout << "lcn: [" << retrieval_buffer.Extents[0].Lcn.QuadPart << ".." << retrieval_buffer.Extents[0].Lcn.QuadPart+vcnlength << "] length: " << vcnlength << std::endl;
 
-			
+			//linux filefrag make an interval from start to end (including)
+			//thus [0..0] is one block
+			//[0..1] is two blocks
 			frag->vcnstart = retrieval_buffer.StartingVcn;
-			frag->vcnstop = retrieval_buffer.Extents[0].NextVcn;
+			(frag->vcnstop).QuadPart = retrieval_buffer.Extents[0].NextVcn.QuadPart - one;
 			frag->lcnstart = retrieval_buffer.Extents[0].Lcn;
-			(frag->lcnstop).QuadPart = retrieval_buffer.Extents[0].Lcn.QuadPart + vcnlength;
+			(frag->lcnstop).QuadPart = retrieval_buffer.Extents[0].Lcn.QuadPart + vcnlength - one;
 			(frag->length) = vcnlength;
 			fragments[(frag->lcnstart).QuadPart] = frag;
 
