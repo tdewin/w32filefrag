@@ -63,7 +63,7 @@ bool GetVolInfo(wchar_t* pfname, VINFO* vinfo) {
 
 
 
-void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
+void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf,bool doMerge)
 {
 	if (NULL == handle)
 	{
@@ -82,10 +82,14 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 	LONGLONG				   total =0;
 	LONGLONG				   vcnlength = 0;
 	LONGLONG				   frags = 0;
+	LONGLONG				unmergedfragcount = 0;
 	LONGLONG				one = 1;
 	std::map<LONGLONG, PFRAG> fragments;
 
 	vcn_buffer.StartingVcn.QuadPart = pre_vcn = 0;
+
+	PFRAG prev = NULL;
+	PFRAG frag = NULL;
 
 	// every time its return only one Extent, if there are many ,you need get many times
 	do
@@ -99,7 +103,7 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 			&retbytes,
 			NULL);
 
-		PFRAG frag = (PFRAG)malloc(sizeof(FRAG));
+		
 
 		error = GetLastError();
 		//std::cout << retrieval_buffer.ExtentCount << std::endl;
@@ -119,22 +123,45 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 		case NO_ERROR:
 			vcnlength = retrieval_buffer.Extents[0].NextVcn.QuadPart - pre_vcn;
 
+			
 			//std::cout << "lcn: [" << retrieval_buffer.Extents[0].Lcn.QuadPart << ".." << retrieval_buffer.Extents[0].Lcn.QuadPart+vcnlength << "] length: " << vcnlength << std::endl;
 
-			//linux filefrag make an interval from start to end (including)
-			//thus [0..0] is one block
-			//[0..1] is two blocks
-			frag->vcnstart = retrieval_buffer.StartingVcn;
-			(frag->vcnstop).QuadPart = retrieval_buffer.Extents[0].NextVcn.QuadPart - one;
-			frag->lcnstart = retrieval_buffer.Extents[0].Lcn;
-			(frag->lcnstop).QuadPart = retrieval_buffer.Extents[0].Lcn.QuadPart + vcnlength - one;
-			(frag->length) = vcnlength;
-			fragments[(frag->lcnstart).QuadPart] = frag;
+			LARGE_INTEGER lcnstart = retrieval_buffer.Extents[0].Lcn;
+			LARGE_INTEGER vcnstart = retrieval_buffer.StartingVcn;
 
+			if (prev != NULL && doMerge && 
+				((prev->lcnstop.QuadPart) + one) == lcnstart.QuadPart && 
+				((prev->vcnstop.QuadPart) + one) == vcnstart.QuadPart
+				) {
+				//merge interval if the end of prev lcnstop & vcnstop are equal.
+				//basically when overreporting is done
+
+				prev->lcnstop.QuadPart = retrieval_buffer.Extents[0].Lcn.QuadPart + vcnlength - one;
+				prev->vcnstop.QuadPart = retrieval_buffer.Extents[0].NextVcn.QuadPart - one;
+				prev->length = prev->length + vcnlength;
+				
+
+			}
+			else {
+				frag = (PFRAG)malloc(sizeof(FRAG));
+
+				//linux filefrag make an interval from start to end (including)
+				//thus [0..0] is one block
+				//[0..1] is two blocks
+				frag->vcnstart = retrieval_buffer.StartingVcn;
+				(frag->vcnstop).QuadPart = retrieval_buffer.Extents[0].NextVcn.QuadPart - one;
+				frag->lcnstart = lcnstart;
+				(frag->lcnstop).QuadPart = retrieval_buffer.Extents[0].Lcn.QuadPart + vcnlength - one;
+				(frag->length) = vcnlength;
+				fragments[(frag->lcnstart).QuadPart] = frag;
+
+				frags++;
+			}
+			unmergedfragcount++;
+			
+			
 			//setting it up for next request calculation
 			pre_vcn = vcn_buffer.StartingVcn.QuadPart;
-
-			frags++;
 			total += vcnlength;
 
 			break;
@@ -142,6 +169,8 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 			std::cout << "error code is " << error << std::endl;
 			break;
 		};
+
+		prev = frag;
 	} while (ERROR_MORE_DATA == error);
 
 	fprintf(outf,"file: %ws\n", pfname);
@@ -149,6 +178,9 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 	fprintf(outf, "cluster_size_b: %ld\n", vinfo->ClusterSize);
 	fprintf(outf, "total_size_b: %lld\n", total*(vinfo->ClusterSize));
 	fprintf(outf, "extent_count: %lld\n", frags);
+	if (doMerge) {
+		fprintf(outf, "unmerged_extent_count: %lld\n", unmergedfragcount);
+	}
 
 	std::map<LONGLONG, PFRAG>::iterator it;
 	fprintf(outf, "extents:\n");
@@ -177,6 +209,7 @@ void help() {
 	std::cout << " w32filefrag -o <file.frag> <file_to_scan>" << std::endl;
 	std::cout << "" << std::endl;
 	std::cout << "  -h (dumps this help and exits)" << std::endl;
+	std::cout << "  -m (merge lcn if possible, this might break the vcn calculation)" << std::endl;
 	std::cout << "  -o <file.frag> (optional output file, if no output file is supplied, write to stdout)" << std::endl;
 	std::cout << "" << std::endl;
 	exit(-1);
@@ -189,6 +222,7 @@ int main(int argc, char* argv[])
 		FILE* outf = NULL;
 		bool closeout = false;
 		char* in_file = NULL ;
+		bool doMerge = false;
 
 		//parsing arguments
 		//-o outfile infile
@@ -197,6 +231,8 @@ int main(int argc, char* argv[])
 		for (int i = 1; i < argc; i++) {
 			if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
 				help();
+			} else if (strcmp(argv[i], "-m") == 0) {
+				doMerge = true;
 			}
 			else if (strcmp(argv[i],"-o") == 0 && (i+1) < argc) {
 				char* outfile = argv[i + 1];
@@ -268,7 +304,7 @@ int main(int argc, char* argv[])
 				VINFO vinfo;
 			
 				GetVolInfo(wstr, &vinfo);			
-				GetFileOffset(wstr,file_handle,&vinfo,outf);
+				GetFileOffset(wstr,file_handle,&vinfo,outf,doMerge);
 			}
 
 
