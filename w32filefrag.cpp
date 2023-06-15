@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <map>
 #include <io.h> 
+#include <regex>
 #define access    _access_s
 
 #define SUPERMAXPATH 4096
@@ -167,6 +168,19 @@ void GetFileOffset(wchar_t* pfname, HANDLE handle,VINFO* vinfo, FILE* outf)
 
 }
 
+void help() {
+	std::cout << "" << std::endl;
+	std::cout << "W32FILEFRAG" <<std::endl;
+	std::cout << "--------------------------------------------------" << std::endl;
+	std::cout << "Dumps the file fragment is the volume offset order" << std::endl;
+	std::cout << "" << std::endl;
+	std::cout << " w32filefrag -o <file.frag> <file_to_scan>" << std::endl;
+	std::cout << "" << std::endl;
+	std::cout << "  -h (dumps this help and exits)" << std::endl;
+	std::cout << "  -o <file.frag> (optional output file, if no output file is supplied, write to stdout)" << std::endl;
+	std::cout << "" << std::endl;
+	exit(-1);
+}
 int main(int argc, char* argv[])
 {
 	if (argc > 1) {
@@ -181,28 +195,41 @@ int main(int argc, char* argv[])
 		//or 
 		//infile
 		for (int i = 1; i < argc; i++) {
-			if (strcmp(argv[i],"-o") == 0 && (i+1) < argc) {
+			if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+				help();
+			}
+			else if (strcmp(argv[i],"-o") == 0 && (i+1) < argc) {
 				char* outfile = argv[i + 1];
 				//check if file exists and if so, refuse to use it
 				if (access(outfile, 0) != 0) {
-					std::cout << "out_file: " << outfile << std::endl;
-					errno_t tryopen = fopen_s(&outf, outfile, "w+");
+					std::cmatch m;
+					std::regex rx(".*\\.frag$");
+					const char* first = outfile;
+					const char* last = first + strlen(outfile);
+					if (std::regex_match(first, last, m, rx)) {
+						std::cout << "out_file: " << outfile << std::endl;
+						errno_t tryopen = fopen_s(&outf, outfile, "w+");
 
-					if (tryopen == 0) {
-						closeout = true;
+						if (tryopen == 0) {
+							closeout = true;
+						}
+						else {
+							std::cout << "ERROR: fopen_s failed with error :" << tryopen << std::endl;
+							help();
+						}
 					}
 					else {
-						std::cout << "fopen_s failed with error :" << tryopen << std::endl;
-						exit(-1);
+						std::cout << "ERROR: " << outfile << " needs to be a .frag file" << std::endl;
+						help();
 					}
 				} else {
-					std::cout << outfile << " exists, refusing to write to it" << std::endl;
-					exit(-1);
+					std::cout << "ERROR: " << outfile << " exists, refusing to write to it" << std::endl;
+					exit(5);
 				}
 				i++;
 			} else {
 				in_file = argv[i];
-				std::cout << "parsing_file:" << in_file << std::endl;
+				std::cout << "parsing_file: " << in_file << std::endl;
 			}
 		}
 
@@ -232,7 +259,7 @@ int main(int argc, char* argv[])
 
 			if (INVALID_HANDLE_VALUE == file_handle)
 			{
-				std::cout << "open file failed ,error = " << GetLastError() << std::endl;
+				std::cout << "ERROR: " << "open file failed ,error = " << GetLastError() << std::endl;
 				_fcloseall();
 				exit(-3);
 			}
@@ -253,11 +280,12 @@ int main(int argc, char* argv[])
 		else {
 			std::cout << "could not find ref file" << std::endl;
 			_fcloseall();
-			exit(-4);
+			help();
 		}
 	}
 	else {
-		std::cout << "Argc < 1, You need to pass a filepath for analyzing" << std::endl;
+		std::cout << "ERROR: Argc < 1, You need to pass a filepath for analyzing" << std::endl;
+		help();
 	}
 
 	
